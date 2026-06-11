@@ -12,17 +12,17 @@ export function createEventHook(
       return
     }
 
-    if (event.type === "session.created" || event.type === "session.updated") {
+    if (event.type === 'session.created' || event.type === 'session.updated') {
       return
     }
 
     if (
-      event.type === "command.executed"
-      && event.properties?.name === "models"
-      && typeof event.properties?.arguments === "string"
-      && event.properties.arguments.includes("--refresh")
+      event.type === 'command.executed'
+      && event.properties?.name === 'models'
+      && typeof event.properties?.arguments === 'string'
+      && event.properties.arguments.includes('--refresh')
     ) {
-      logger.info("Models refresh detected, clearing discovery cache")
+      logger.info('Models refresh detected, clearing discovery cache')
       await invalidateCache?.()
     }
   }

@@ -41,6 +41,7 @@ function buildProviderConfigHash(
   }
 
   return JSON.stringify({
+    enabled: providerDiscoveryConfig.enabled,
     smartModelName: smartModelNameEnabled ?? false,
     modelInfoEndpoint: providerDiscoveryConfig.modelInfoEndpoint ?? '',
     modelInfoFormat: providerDiscoveryConfig.modelInfoFormat ?? '',

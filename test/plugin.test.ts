@@ -1,6 +1,8 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest'
 import { ModelDiscoveryPlugin } from '../src/index.ts'
 import { clearCache, readCache } from '../src/cache/model-cache.ts'
+import { createEventHook } from '../src/plugin/event-hook.ts'
+import type { PluginLogger } from '../src/plugin/logger.ts'
 
 const mockFetch = vi.fn()
 global.fetch = mockFetch
@@ -1159,6 +1161,63 @@ describe('ModelDiscovery Plugin', () => {
       expect(mockFetch).not.toHaveBeenCalled()
     })
 
+    it('should refresh provider cache when provider-level discovery is explicitly enabled after default discovery', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          data: [
+            { id: 'model-from-default-discovery', object: 'model', created: 1234567890, owned_by: 'local' }
+          ]
+        })
+      })
+
+      const configWithDefaultDiscovery: any = {
+        provider: {
+          ollama: {
+            npm: '@ai-sdk/openai-compatible',
+            name: 'Ollama',
+            options: { baseURL: 'http://127.0.0.1:11434/v1' },
+            models: {}
+          }
+        }
+      }
+
+      await pluginHooks.config(configWithDefaultDiscovery)
+      expect(configWithDefaultDiscovery.provider.ollama.models['model-from-default-discovery']).toBeDefined()
+
+      mockFetch.mockClear()
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          data: [
+            { id: 'model-after-explicit-enable', object: 'model', created: 1234567890, owned_by: 'local' }
+          ]
+        })
+      })
+
+      const configWithExplicitEnable: any = {
+        provider: {
+          ollama: {
+            npm: '@ai-sdk/openai-compatible',
+            name: 'Ollama',
+            options: {
+              baseURL: 'http://127.0.0.1:11434/v1',
+              modelsDiscovery: {
+                enabled: true
+              }
+            },
+            models: {}
+          }
+        }
+      }
+
+      await pluginHooks.config(configWithExplicitEnable)
+
+      expect(configWithExplicitEnable.provider.ollama.models['model-from-default-discovery']).toBeUndefined()
+      expect(configWithExplicitEnable.provider.ollama.models['model-after-explicit-enable']).toBeDefined()
+      expect(mockFetch).toHaveBeenCalledTimes(1)
+    })
+
     it('should invalidate provider cache when api key changes', async () => {
       mockFetch.mockResolvedValueOnce({
         ok: true,
@@ -1302,6 +1361,24 @@ describe('ModelDiscovery Plugin', () => {
   })
 
   describe('Event Hook', () => {
+    const createTestEventHook = () => {
+      const invalidateCache = vi.fn().mockResolvedValue(undefined)
+      const logger: PluginLogger = {
+        debug: vi.fn(),
+        info: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn(),
+        child: vi.fn(),
+      }
+      logger.child = vi.fn(() => logger)
+
+      return {
+        eventHook: createEventHook(logger, invalidateCache),
+        invalidateCache,
+        logger,
+      }
+    }
+
     it('should validate event input', async () => {
       await pluginHooks.event({ event: null })
       expect(mockClient.app.log).toHaveBeenLastCalledWith(expect.objectContaining({
@@ -1320,6 +1397,32 @@ describe('ModelDiscovery Plugin', () => {
     it('should handle session events gracefully', async () => {
       await pluginHooks.event({ event: { type: 'session.created' } })
       expect(true).toBe(true)
+    })
+
+    it('should not invalidate cache on server.connected event', async () => {
+      const { eventHook, invalidateCache, logger } = createTestEventHook()
+
+      await eventHook({ event: { type: 'server.connected' } })
+
+      expect(invalidateCache).not.toHaveBeenCalled()
+      expect(logger.info).not.toHaveBeenCalled()
+    })
+
+    it('should invalidate cache on models --refresh command', async () => {
+      const { eventHook, invalidateCache, logger } = createTestEventHook()
+
+      await eventHook({
+        event: {
+          type: 'command.executed',
+          properties: {
+            name: 'models',
+            arguments: '--refresh'
+          }
+        }
+      })
+
+      expect(invalidateCache).toHaveBeenCalledTimes(1)
+      expect(logger.info).toHaveBeenCalledWith('Models refresh detected, clearing discovery cache')
     })
   })
 
